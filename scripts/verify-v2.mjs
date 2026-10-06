@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import {DatabaseSync} from 'node:sqlite';
+import {readFileSync,readdirSync} from 'node:fs';
+import worker from '../src/worker.mjs';
+import {digest} from '../src/admin-auth.mjs';
+import {tasks,blockers,practices,makePlan} from '../src/v2-content.mjs';
+const sqlite=new DatabaseSync(':memory:');
+sqlite.exec('PRAGMA foreign_keys=ON');
+for(const file of readdirSync('drizzle').filter(f=>f.endsWith('.sql')).sort())sqlite.exec(readFileSync('drizzle/'+file,'utf8'));
+const binding={prepare(sql){return {bind(...args){return {first:()=>sqlite.prepare(sql).get(...args)||null,all:()=>({results:sqlite.prepare(sql).all(...args)}),run:()=>sqlite.prepare(sql).run(...args)}}}},async batch(statements){sqlite.exec('BEGIN');try{const result=statements.map(s=>s.run());sqlite.exec('COMMIT');return result}catch(e){sqlite.exec('ROLLBACK');throw e}}};
+const env={DB:binding,ASSETS:{fetch:()=>new Response('asset')}};
+const origin='https://example.test';
+function client(){let cookie='';return async(path,data,{status=200,headers={}}={})=>{const res=await worker.fetch(new Request(origin+path,{method:data===undefined?'GET':'POST',headers:{cookie,origin,'content-type':'application/json',...headers},...(data===undefined?{}:{body:JSON.stringify(data)})}),env);const set=res.headers.get('set-cookie');if(set)cookie=set.split(';')[0];const text=await res.text();assert.equal(res.status,status,path+' '+text);return res.headers.get('content-type')?.includes('application/json')?JSON.parse(text):text}}
+const a=client(),b=client();const adminToken='a'.repeat(64);sqlite.prepare('INSERT INTO admin_sessions(token_hash,expires_at) VALUES(?,?)').run(await digest(adminToken),Date.now()+3600000);const auth={headers:{cookie:'hatch_admin='+adminToken}};
+const enter=async(c,source,qa=false)=>{const id=crypto.randomUUID();const response=await c('/api/v2/enter',{id,source,qa});return response.run};
+const event=(c,id,name,extra={})=>c('/api/v2/event',{runId:id,name,...extra});
+const run=await enter(a,'network');await a('/api/v2/enter',{id:run.id,source:'changed'});assert.equal(sqlite.prepare('SELECT COUNT(*) AS n FROM v2_runs').get().n,1);
+assert.equal((await a('/api/v2/run?id='+run.id)).selectedLevel,null);
+await event(a,run.id,'level_explore',{level:4});await event(a,run.id,'level_explore',{level:4});
+await a('/api/v2/event',{runId:run.id,name:'level_select',level:8,eventId:crypto.randomUUID()},{status:400});
+await b('/api/v2/event',{runId:run.id,name:'level_select',level:4,eventId:crypto.randomUUID()},{status:404});
+await event(a,run.id,'level_select',{level:0,eventId:crypto.randomUUID()});assert.equal((await a('/api/v2/run?id='+run.id)).selectedLevel,0);
+await event(a,run.id,'level_select',{level:4,eventId:crypto.randomUUID()});assert.equal((await a('/api/v2/run?id='+run.id)).selectedLevel,4);
+assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM v2_events WHERE name='level_explore_4'").get().n,1);
+assert.equal(sqlite.prepare('SELECT started_at FROM v2_runs WHERE id=?').get(run.id).started_at,null);
+await a('/api/v2/event',{runId:run.id,name:'prompt_copy'},{status:400});
+await b('/api/v2/run?id='+run.id,undefined,{status:404});
+await b('/api/v2/select',{runId:run.id,task:'study'},{status:404});
+await a('/api/v2/select',{runId:run.id,task:'invalid'},{status:400});
+await a('/api/v2/select',{runId:run.id,task:'research'});
+await a('/api/v2/select',{runId:run.id,task:'research',blocker:'verify'});
+const profile={runId:run.id,task:'research',blocker:'verify',practice:'context'};
+const done=await a('/api/v2/select',profile);assert.equal(done.plan.practice,'자료와 조건을 함께 제공합니다');assert.equal((await a('/api/v2/select',profile)).plan.title,done.plan.title);
+await a('/api/v2/select',{...profile,practice:'system'},{status:409});
+await event(a,run.id,'result_view');await event(a,run.id,'result_view');await event(a,run.id,'prompt_copy');await event(a,run.id,'trial_open');
+const eid=crypto.randomUUID();await event(a,run.id,'feedback',{eventId:eid,outcome:'useful',reason:'clearer'});await event(a,run.id,'feedback',{eventId:eid,outcome:'useful',reason:'clearer'});
+assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM v2_events WHERE name LIKE 'feedback_%'").get().n,1);
+assert.equal((await a('/api/v2/run?id='+run.id)).feedback.outcome,'useful');
+await event(a,run.id,'feedback',{eventId:crypto.randomUUID(),outcome:'not_yet',reason:'no_time'});assert.equal((await a('/api/v2/run?id='+run.id)).feedback.outcome,'not_yet');
+const second=await enter(a,'network');await a('/api/v2/select',{runId:second.id,task:'study',blocker:'structure',practice:'ask'});await event(a,second.id,'result_view');
+const qa=await enter(b,'internal_review');assert.equal(qa.is_qa,1);await b('/api/v2/select',{runId:qa.id,task:'presentation',blocker:'repeat',practice:'system'});await event(b,qa.id,'result_view');
+await a('/api/admin/v2/summary',undefined,{status:401});await a('/api/admin/v2/export.csv',undefined,{status:401});
+let summary=await a('/api/admin/v2/summary',undefined,auth);assert.equal(summary.metrics.visitors,1);assert.equal(summary.metrics.runs,2);assert.equal(summary.metrics.viewed,1);assert.equal(summary.metrics.applied,0);assert.equal(summary.excludedQa,1);assert.equal(summary.levelMap.explored,1);assert.equal(summary.levelMap.selected,1);assert.equal(summary.levelMap.byLevel[4].users,1);assert.equal(summary.levelMap.byLevel[0].users,0);
+summary=await a('/api/admin/v2/summary?qa=1',undefined,auth);assert.equal(summary.metrics.visitors,2);
+summary=await a('/api/admin/v2/summary?source=missing',undefined,auth);assert.equal(summary.metrics.visitors,0);
+// Verify historical feedback is reconstructed at the experiment cutoff, not overwritten.
+sqlite.prepare("UPDATE v2_runs SET created_at='2026-10-01 00:00:00',started_at='2026-10-01 00:01:00',result_at='2026-10-01 00:02:00' WHERE id=?").run(run.id);
+sqlite.prepare("UPDATE v2_events SET created_at='2026-10-01 00:03:00' WHERE run_id=?").run(run.id);
+sqlite.prepare("UPDATE v2_events SET created_at='2026-10-04 00:00:00' WHERE run_id=? AND name LIKE 'feedback_%' AND json_extract(detail,'$.outcome')='not_yet'").run(run.id);
+summary=await a('/api/admin/v2/summary?start=2026-10-01T00:00:00Z&end=2026-10-03T00:00:00Z',undefined,auth);assert.equal(summary.metrics.applied,1);assert.equal(summary.metrics.useful,1);
+await a('/api/admin/v2/summary?start=bad',undefined,{...auth,status:400});
+await a('/api/v2/enter',{id:crypto.randomUUID()},{headers:{origin:'https://other.test'},status:403});
+const csv=await a('/api/admin/v2/export.csv',undefined,auth);assert.match(csv,/event_at/);assert.match(csv,/feedback_/);assert.doesNotMatch(csv,/internal_review/);
+for(const task of tasks)for(const blocker of blockers)for(const practice of practices){const p=makePlan({task:task.id,blocker:blocker.id,practice:practice.id});assert.equal(p.checks.length,3);assert.ok(p.prompt.length>100);assert.ok(!p.prompt.includes('undefined'))}
+assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM sqlite_master WHERE type='table' AND name IN ('sessions','events','completions','utility_waitlist')").get().n,0);
+assert.match(await a('/'),/AI HATCH V2/);assert.match(await a('/admin'),/AI HATCH V2/);
+await a('/api/content',undefined,{status:404});
+for(const [path,target] of [['/v2?src=network&qa=1','/?src=network&qa=1'],['/v2/admin','/admin']]){
+ const redirect=await worker.fetch(new Request(origin+path),env);assert.equal(redirect.status,302);assert.equal(redirect.headers.get('location'),origin+target);
+}
+// Verify owner credential initialization and real password login on the independent database.
+const password='synthetic-test-password-only',salt='b'.repeat(64),encoder=new TextEncoder();
+const key=await crypto.subtle.importKey('raw',encoder.encode(password),'PBKDF2',false,['deriveBits']);
+const bytes=await crypto.subtle.deriveBits({name:'PBKDF2',salt:encoder.encode(salt),iterations:100000,hash:'SHA-256'},key,256);
+const hash=Buffer.from(bytes).toString('hex');env.ADMIN_ACCOUNT_SEED=JSON.stringify({password_hash:hash,salt,created_at:1});
+const owner=client();assert.equal((await owner('/api/admin/auth')).configured,true);
+await owner('/api/admin/login',{password:'wrong-password'},{status:401});
+await owner('/api/admin/login',{password});assert.equal((await owner('/api/admin/auth')).authenticated,true);
+assert.ok((await owner('/api/admin/v2/summary')).metrics);
+await owner('/api/admin/logout',{});assert.equal((await owner('/api/admin/auth')).authenticated,false);
+assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM admin_account').get().n,1);
+console.log('PASS: independent V2 root/admin, legacy redirects preserve query, V1 endpoints absent; admin credential initialization/login/logout; 27 plans; identity isolation; origin checks; event idempotency; QA exclusion; cohort statistics; CSV.');
+if(process.argv.includes('--serve-admin-fixture')){
+ const {createServer}=await import('node:http');
+ const mime={'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml'};
+ env.ASSETS.fetch=async request=>{const path=new URL(request.url).pathname;const ext=path.slice(path.lastIndexOf('.'));return new Response(readFileSync('public'+path),{headers:{'content-type':mime[ext]||'text/plain'}})};
+ createServer(async(req,res)=>{try{const headers=new Headers(req.headers);headers.set('cookie','hatch_admin='+adminToken);const chunks=[];for await(const c of req)chunks.push(c);const body=Buffer.concat(chunks);const response=await worker.fetch(new Request('http://127.0.0.1:8788'+req.url,{method:req.method,headers,...(body.length?{body}: {})}),env);res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()))}catch(e){res.writeHead(500);res.end(e.message)}}).listen(8788,'127.0.0.1',()=>console.log('Synthetic admin fixture: http://127.0.0.1:8788/v2/admin'));
+}else sqlite.close();

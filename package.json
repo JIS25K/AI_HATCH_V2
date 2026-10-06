@@ -1,0 +1,1 @@
+{"name": "ai-hatch-v2-site", "private": true, "type": "module", "scripts": {"build": "node build.mjs", "dev": "wrangler dev", "db:generate": "drizzle-kit generate", "check": "node --check src/worker.mjs && node --check public/v2/app.js"}, "devDependencies": {"drizzle-kit": "^0.31.0", "drizzle-orm": "^0.44.0", "wrangler": "^4.0.0"}}
