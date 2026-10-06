@@ -1,4 +1,5 @@
-export const version='workflow-study-2026-10-06-v3-workflows';
+import {kitFor,offerFor} from './workflow-kits.mjs';
+export const version='workflow-study-2026-10-06-v4-purchase';
 export const levels=[
  {level:0,workflowTitle:"낯선 개념 이해하기",workflow:["모르는 개념 질문", "AI 설명과 예시 받기", "교재와 내용 대조", "내 말로 다시 정리"],keywords:[{"term": "Q&A", "meaning": "질문과 답변"}, {"term": "Summarization", "meaning": "긴 자료의 핵심 요약"}, {"term": "Fact-checking", "meaning": "답을 원문과 대조"}],name:'물어보기',term:'Search & Q&A',summary:'궁금한 것을 묻고, 필요한 답을 얻습니다.',example:'어려운 개념의 설명을 듣거나, 긴 글을 요약합니다.',check:'막히면 질문하지만, 실제 작업은 대부분 직접 합니다.',next:'하고 싶은 일의 목적과 원하는 답의 형식을 함께 알려주세요.'},
  {level:1,workflowTitle:"조건에 맞는 발표 초안 만들기",workflow:["청중·목적·분량 지정", "원하는 출력 예시 제공", "AI 초안 확인", "빠진 조건을 짚어 수정"],keywords:[{"term": "Task specification", "meaning": "목표와 완료 조건 정의"}, {"term": "Few-shot", "meaning": "원하는 답의 예시 제공"}, {"term": "Output format", "meaning": "결과의 형식 지정"}],name:'명확하게 지시하기',term:'Prompt Operator',summary:'목적·조건·형식을 정해 일을 맡깁니다.',example:'“신입생 대상 발표용으로, 이 내용을 세 문장으로 정리해줘.”',check:'누구를 위한 결과인지, 어떤 조건을 지킬지 구체적으로 설명합니다.',next:'매번 필요한 배경 자료와 공통 지침을 한곳에 모아보세요.'},
@@ -10,9 +11,9 @@ export const levels=[
  {level:7,workflowTitle:"여러 업무를 하나의 작업 환경에서 운영하기",workflow:["공통 자료·기억·권한 관리", "업무에 맞는 흐름 실행", "결과·비용·오류 함께 점검", "다음 업무에 기록 재사용"],keywords:[{"term": "Orchestration", "meaning": "여러 작업 흐름의 조율"}, {"term": "Memory layer", "meaning": "재사용할 기록의 저장·검색"}, {"term": "Personal AI infrastructure", "meaning": "내 업무를 연결하는 AI 기반 환경"}],name:'나만의 작업 시스템',term:'Personal AI Infrastructure',summary:'여러 업무의 자료·도구·실행·검증을 연결해 운영합니다.',example:'공부·개발·리서치의 기록과 도구를 연결하고, 접근 권한과 결과를 관리합니다.',check:'한 번 만든 자동화를 넘어, 여러 흐름을 지속적으로 점검하고 개선합니다.',next:'더 복잡하게 늘리기보다, 실제로 다시 쓰는지와 유지 비용을 점검해보세요.'}
 ];
 export const tasks=[
- {id:'research',name:'자료 조사·비교',description:'여러 자료를 읽고, 근거 있는 결론을 정리하는 일',preview:'비교 기준과 원문 근거를 갖춘 조사 방식',material:'비교하려는 자료 2개와 답을 찾고 싶은 질문 하나',unit:'자료 두 개의 비교표 한 행'},
- {id:'study',name:'시험공부',description:'강의자료를 이해하고, 아는지 확인하는 일',preview:'이해한 내용과 약한 개념을 확인하는 공부 방식',material:'강의자료의 한 단원과 시험 범위',unit:'한 개념을 묻는 문제 3개'},
- {id:'presentation',name:'발표 구성',description:'자료를 추려, 제한 시간 안에 전달하는 일',preview:'핵심 메시지와 시간을 맞추는 발표 준비 방식',material:'발표 자료 일부, 청중, 발표 시간과 전달할 결론',unit:'발표의 첫 1분'}
+ {id:'research',name:'자료 조사·비교',description:'여러 자료를 읽고, 근거 있는 결론을 정리하는 일',preview:'주장·근거 비교표 + 출처 확인 순서',material:'비교하려는 자료 2개와 답을 찾고 싶은 질문 하나',unit:'자료 두 개의 비교표 한 행'},
+ {id:'study',name:'시험공부',description:'강의자료를 이해하고, 아는지 확인하는 일',preview:'확인 문제 + 오답 진단 + 복습 카드 양식',material:'강의자료의 한 단원과 시험 범위',unit:'한 개념을 묻는 문제 3개'},
+ {id:'presentation',name:'발표 구성',description:'자료를 추려, 제한 시간 안에 전달하는 일',preview:'시간 배분표 + 대본 + 슬라이드 원고',material:'발표 자료 일부, 청중, 발표 시간과 전달할 결론',unit:'발표의 첫 1분'}
 ];
 export const blockers=[
  {id:'structure',name:'어디서 시작할지 막힙니다',description:'자료는 있지만, 무엇부터 어떤 순서로 할지 어렵습니다.'},
@@ -48,5 +49,6 @@ export function makePlan({task,blocker,practice}){
  if(!t||!b||!p)throw new Error('Invalid profile');
  const recipe=recipes[task][blocker];
  const adaptation={ask:{label:'작게 시작하기',text:'새 도구를 연결하기보다, 익숙한 AI 대화창에 자료 일부와 아래 요청문을 함께 넣어보세요. 한 번의 결과만 확인하면 됩니다.',extra:'\n한 번에 한 단계만 진행하고, 필요한 입력이 빠졌으면 먼저 질문해줘.'},context:{label:'확인 기준 더하기',text:'이미 자료와 조건을 주고 있다면, 아래 검토 기준 중 하나를 요청에 추가하세요. 수정 횟수보다 근거와 조건이 충족됐는지 확인합니다.',extra:'\n답변 마지막에 내가 준 조건 중 충족한 것과 아직 확인이 필요한 것을 구분해줘.'},system:{label:'재사용 방식 점검하기',text:'현재 저장한 지침이나 템플릿에 아래 검토 기준을 추가하세요. 새 자료에서도 같은 기준을 통과하는지 한 번 확인해보세요.',extra:'\n이번 작업의 고유 내용과 재사용 가능한 규칙을 분리해줘. 다음 자료에 적용할 때 다시 확인해야 할 조건도 남겨줘.'}}[practice];
- return {...recipe,task:t.name,blocker:b.name,practice:p.name,material:t.material,unit:t.unit,adaptation,prompt:recipe.prompt+adaptation.extra,version};
+ const kit=kitFor(task,blocker);
+ return {...recipe,kit,offer:offerFor(task),task:t.name,blocker:b.name,practice:p.name,material:t.material,unit:t.unit,adaptation,prompt:recipe.prompt+adaptation.extra+kit.prompt,version};
 }

@@ -1,3 +1,4 @@
+import {offerFor} from './workflow-kits.mjs';
 import {version,levels,tasks,blockers,practices,outcomes,reasons,makePlan} from './v2-content.mjs';
 const clean=v=>typeof v==='string'?v.replace(/[^a-zA-Z0-9가-힣_-]/g,'').slice(0,60):'';
 const has=(list,id)=>list.some(x=>x.id===id);
@@ -47,14 +48,18 @@ export async function v2Route({request,url,db,visitor,json}){
    return json(200,{ok:true});
   }
   if(!run.result_at)fail(400,'실행안을 먼저 확인해주세요.');
-  const names=['result_view','prompt_copy','trial_open','return_link_copy','feedback'];
+  const names=['result_view','prompt_copy','prompt_copy_click','trial_open','return_link_copy','offer_view','purchase_click','feedback'];
   if(!names.includes(input.name))fail(400,'잘못된 이벤트입니다.');
   if(input.name!=='result_view'&&!await db.one("SELECT 1 FROM v2_events WHERE run_id=? AND name='result_view'",run.id))fail(400,'실행안을 먼저 확인해주세요.');
+  if(input.name==='purchase_click'&&!await db.one("SELECT 1 FROM v2_events WHERE run_id=? AND name='offer_view'",run.id))fail(400,'상품 안내를 먼저 확인해주세요.');
   if(input.name==='feedback'){
    if(!has(outcomes,input.outcome)||!has(reasons[input.outcome]||[],input.reason))fail(400,'적용 결과와 이유를 선택해주세요.');
    if(!uuid.test(input.eventId||''))fail(400,'응답 식별자가 필요합니다.');
    await writeEvent(db,run.id,'feedback_'+input.eventId,JSON.stringify({outcome:input.outcome,reason:input.reason}));
-  }else await writeEvent(db,run.id,input.name);
+  }else {
+   const detail={contentVersion:version,...(['offer_view','purchase_click'].includes(input.name)?{offer:offerFor(run.task)}:{})};
+   await writeEvent(db,run.id,input.name,JSON.stringify(detail));
+  }
   return json(200,{ok:true});
  }
  return json(404,{error:'not found'});
@@ -77,11 +82,14 @@ async function adminRoute({request,url,db,json}){
  const lastLevel=new Map();for(const row of allRows)if(row.name?.startsWith('level_select_'))lastLevel.set(row.id,row);
  const levelMap={explored:new Set(allRows.filter(r=>r.name?.startsWith('level_explore_')).map(r=>r.visitor_id)).size,selected:new Set([...lastLevel.values()].map(r=>r.visitor_id)).size,byLevel:levels.map(l=>({level:l.level,users:new Set([...lastLevel.values()].filter(r=>Number(r.detail)===l.level).map(r=>r.visitor_id)).size}))};
  const rows=allRows.filter(row=>!row.name?.startsWith('feedback_')).concat([...lastFeedback.values()].map(row=>({...row,name:'feedback'})));
- const metricsFor=items=>{const sets=Object.fromEntries(['visitors','started','generated','viewed','copied','trial','applied','useful','feedback'].map(k=>[k,new Set()]));const runs=new Set();for(const r of items){runs.add(r.id);sets.visitors.add(r.visitor_id);if(r.started_at&&r.started_at<end)sets.started.add(r.visitor_id);if(r.result_at&&r.result_at<end)sets.generated.add(r.visitor_id);const key={result_view:'viewed',prompt_copy:'copied',trial_open:'trial'}[r.name];if(key)sets[key].add(r.visitor_id);if(r.name==='feedback'){sets.feedback.add(r.visitor_id);const f=JSON.parse(r.detail);if(f.outcome!=='not_yet')sets.applied.add(r.visitor_id);if(f.outcome==='useful')sets.useful.add(r.visitor_id)}}return {...Object.fromEntries(Object.entries(sets).map(([k,v])=>[k,v.size])),runs:runs.size}};
+ const metricsFor=items=>{const sets=Object.fromEntries(['visitors','started','generated','viewed','copyClicked','copied','offerViewed','purchaseClicked','trial','applied','useful','feedback'].map(k=>[k,new Set()]));const runs=new Set();for(const r of items){runs.add(r.id);sets.visitors.add(r.visitor_id);if(r.started_at&&r.started_at<end)sets.started.add(r.visitor_id);if(r.result_at&&r.result_at<end)sets.generated.add(r.visitor_id);const key={result_view:'viewed',prompt_copy_click:'copyClicked',prompt_copy:'copied',offer_view:'offerViewed',purchase_click:'purchaseClicked',trial_open:'trial'}[r.name];if(key)sets[key].add(r.visitor_id);if(r.name==='feedback'){sets.feedback.add(r.visitor_id);const f=JSON.parse(r.detail);if(f.outcome!=='not_yet')sets.applied.add(r.visitor_id);if(f.outcome==='useful')sets.useful.add(r.visitor_id)}}return {...Object.fromEntries(Object.entries(sets).map(([k,v])=>[k,v.size])),runs:runs.size}};
  const group=key=>[...new Set(rows.map(r=>r[key]||'unselected'))].map(value=>({value,...metricsFor(rows.filter(r=>(r[key]||'unselected')===value))}));
+ const byFunnel=tasks.flatMap(t=>blockers.flatMap(b=>practices.map(p=>({task:t.id,blocker:b.id,practice:p.id,...metricsFor(rows.filter(r=>r.task===t.id&&r.blocker===b.id&&r.practice===p.id))}))));
+ const offerRows=rows.filter(r=>['offer_view','purchase_click'].includes(r.name));
+ const byOffer=[...new Set(offerRows.map(r=>JSON.parse(r.detail).offer.id))].map(id=>{const items=offerRows.filter(r=>JSON.parse(r.detail).offer.id===id);const detail=JSON.parse(items[0].detail);return {id,price:detail.offer.price,currency:detail.offer.currency,contentVersion:detail.contentVersion,...metricsFor(items)};});
  const feedback=rows.filter(r=>r.name==='feedback');const outcomesSummary=outcomes.map(o=>({value:o.id,users:new Set(feedback.filter(r=>JSON.parse(r.detail).outcome===o.id).map(r=>r.visitor_id)).size}));
  const reasonSummary=Object.entries(reasons).flatMap(([outcome,rs])=>rs.map(reason=>({outcome,value:reason.id,users:new Set(feedback.filter(r=>{const f=JSON.parse(r.detail);return f.outcome===outcome&&f.reason===reason.id}).map(r=>r.visitor_id)).size})));
  const excluded=(await db.one(`SELECT COUNT(DISTINCT visitor_id) AS n FROM v2_runs r WHERE r.created_at>=? AND r.created_at<? AND r.is_qa=1${source?' AND r.source=?':''}`,...args)).n;
  const first=(await db.one('SELECT MIN(created_at) AS at FROM v2_runs WHERE is_qa=0')).at;
- return json(200,{version,start,end,includeQa,excludedQa:excluded,firstEntry:first,metrics:metricsFor(rows),levelMap,byVersion:group('version'),bySource:group('source'),byTask:group('task'),byBlocker:group('blocker'),byPractice:group('practice'),outcomes:outcomesSummary,reasons:reasonSummary});
+ return json(200,{version,start,end,includeQa,excludedQa:excluded,firstEntry:first,metrics:metricsFor(rows),levelMap,byFunnel,byOffer,byVersion:group('version'),bySource:group('source'),byTask:group('task'),byBlocker:group('blocker'),byPractice:group('practice'),outcomes:outcomesSummary,reasons:reasonSummary});
 }
