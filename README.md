@@ -40,3 +40,11 @@ Verification covers all profiles, authentication, cross-browser isolation, price
 - Marp: https://marp.app/ — Markdown slides and HTML/PDF/PowerPoint export, MIT ecosystem. Used for an actionable text-to-slide output contract; rendered layouts and actual speaking time still require review.
 
 The comparison, misconception and presentation examples are authored fictional fixtures, not measured customer outcomes. Source tool capabilities support workflow design; they do not prove our guide's value. Next evidence: copies, price-exposed purchase clicks, and later observed real work.
+
+## Free/paid boundary revision
+
+Version `workflow-study-2026-10-06-v5-guide-boundary` stops the free report after 04 / Acceptance Check. The detailed tool setup/implementation section and feedback form are no longer rendered. The next section shows tool examples and a KRW 4,900 proposed guide covering selection, installation, configuration, first run on the visitor's materials, troubleshooting, verification, and reuse. It remains unavailable: purchase opens the preparation notice, never checkout. Offer ID changes to `setup-guide-4900-v2` so prior clicks on a different scope are separable. Historical feedback data and APIs remain available for reporting.
+
+The prompt copy button is now in a sticky toolbar at the prompt panel's top right. Manual selection/copy is not counted as a button click; clicking and successful clipboard copying remain distinct metrics.
+
+Offer view/purchase events use version-suffixed names from this revision onward. A returning saved run can record the new offer separately; aggregate browser counts remain deduplicated, while per-offer results retain each offer's snapshot. CSV preserves raw versioned names.

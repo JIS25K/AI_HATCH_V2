@@ -85,8 +85,8 @@ assert.equal(funnel.metrics.copyClicked,1);assert.equal(funnel.metrics.copied,0)
 await event(buyer,buyerRun.id,'prompt_copy');
 await event(buyer,buyerRun.id,'offer_view',{price:1,offer:{price:1}});
 await event(buyer,buyerRun.id,'purchase_click',{price:1});await event(buyer,buyerRun.id,'purchase_click');
-assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM v2_events WHERE run_id=? AND name='purchase_click'").get(buyerRun.id).n,1);
-const offerDetail=JSON.parse(sqlite.prepare("SELECT detail FROM v2_events WHERE run_id=? AND name='purchase_click'").get(buyerRun.id).detail);assert.equal(offerDetail.offer.price,4900);assert.equal(offerDetail.offer.currency,'KRW');
+assert.equal(sqlite.prepare("SELECT COUNT(*) n FROM v2_events WHERE run_id=? AND name LIKE 'purchase_click%'").get(buyerRun.id).n,1);
+const offerDetail=JSON.parse(sqlite.prepare("SELECT detail FROM v2_events WHERE run_id=? AND name LIKE 'purchase_click%'").get(buyerRun.id).detail);assert.equal(offerDetail.offer.price,4900);assert.equal(offerDetail.offer.currency,'KRW');
 const repeatBuyerRun=await enter(buyer,'purchase_test_external');
 await buyer('/api/v2/select',{...buyerProfile,runId:repeatBuyerRun.id});
 await event(buyer,repeatBuyerRun.id,'result_view');await event(buyer,repeatBuyerRun.id,'offer_view');await event(buyer,repeatBuyerRun.id,'purchase_click');
@@ -98,7 +98,7 @@ const buyerQaRun=await enter(b,'internal_purchase_test');await b('/api/v2/select
 funnel=await a('/api/admin/v2/summary',undefined,auth);assert.equal(funnel.metrics.purchaseClicked,1);
 funnel=await a('/api/admin/v2/summary?qa=1',undefined,auth);assert.equal(funnel.metrics.purchaseClicked,2);
 const newCsv=await a('/api/admin/v2/export.csv?source=purchase_test_external',undefined,auth);assert.match(newCsv,/purchase_click/);assert.match(newCsv,/4900/);
-sqlite.prepare("UPDATE v2_events SET created_at='2026-10-08 00:00:00' WHERE name='purchase_click'").run();
+sqlite.prepare("UPDATE v2_events SET created_at='2026-10-08 00:00:00' WHERE name LIKE 'purchase_click%'").run();
 funnel=await a('/api/admin/v2/summary?end=2026-10-07T00:00:00Z',undefined,auth);assert.equal(funnel.metrics.purchaseClicked,0);
 for(const task of tasks)for(const blocker of blockers)for(const practice of practices){const plan=makePlan({task:task.id,blocker:blocker.id,practice:practice.id});assert.equal(plan.kit.demo.headers.length,3);assert.equal(plan.offer.price,4900);assert.match(plan.prompt,/출력 계약/);}
 console.log('PASS: purchase prerequisites, price snapshot, copy click/success separation, repeated-click and cross-run browser dedup, all 27 funnels, QA/source/cutoff filters and CSV.');

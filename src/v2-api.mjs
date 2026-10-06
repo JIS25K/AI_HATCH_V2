@@ -1,4 +1,4 @@
-import {offerFor} from './workflow-kits.mjs';
+import {offerFor,offerVersion} from './workflow-kits.mjs';
 import {version,levels,tasks,blockers,practices,outcomes,reasons,makePlan} from './v2-content.mjs';
 const clean=v=>typeof v==='string'?v.replace(/[^a-zA-Z0-9가-힣_-]/g,'').slice(0,60):'';
 const has=(list,id)=>list.some(x=>x.id===id);
@@ -51,14 +51,14 @@ export async function v2Route({request,url,db,visitor,json}){
   const names=['result_view','prompt_copy','prompt_copy_click','trial_open','return_link_copy','offer_view','purchase_click','feedback'];
   if(!names.includes(input.name))fail(400,'잘못된 이벤트입니다.');
   if(input.name!=='result_view'&&!await db.one("SELECT 1 FROM v2_events WHERE run_id=? AND name='result_view'",run.id))fail(400,'실행안을 먼저 확인해주세요.');
-  if(input.name==='purchase_click'&&!await db.one("SELECT 1 FROM v2_events WHERE run_id=? AND name='offer_view'",run.id))fail(400,'상품 안내를 먼저 확인해주세요.');
+  if(input.name==='purchase_click'&&!await db.one("SELECT 1 FROM v2_events WHERE run_id=? AND name=?",run.id,'offer_view_'+offerVersion))fail(400,'상품 안내를 먼저 확인해주세요.');
   if(input.name==='feedback'){
    if(!has(outcomes,input.outcome)||!has(reasons[input.outcome]||[],input.reason))fail(400,'적용 결과와 이유를 선택해주세요.');
    if(!uuid.test(input.eventId||''))fail(400,'응답 식별자가 필요합니다.');
    await writeEvent(db,run.id,'feedback_'+input.eventId,JSON.stringify({outcome:input.outcome,reason:input.reason}));
   }else {
    const detail={contentVersion:version,...(['offer_view','purchase_click'].includes(input.name)?{offer:offerFor(run.task)}:{})};
-   await writeEvent(db,run.id,input.name,JSON.stringify(detail));
+   await writeEvent(db,run.id,['offer_view','purchase_click'].includes(input.name)?input.name+'_'+offerVersion:input.name,JSON.stringify(detail));
   }
   return json(200,{ok:true});
  }
@@ -77,6 +77,7 @@ async function adminRoute({request,url,db,json}){
   const csv='\uFEFF'+[columns,...allRows.map(row=>columns.map(c=>['started_at','result_at'].includes(c)&&row[c]>=end?'':row[c]))].map(r=>r.map(cell).join(',')).join('\r\n');
   return new Response(csv,{headers:{'content-type':'text/csv; charset=utf-8','content-disposition':'attachment; filename="ai-hatch-v2-events.csv"','cache-control':'no-store'}});
  }
+ for(const row of allRows){if(row.name?.startsWith('offer_view_'))row.name='offer_view';if(row.name?.startsWith('purchase_click_'))row.name='purchase_click';}
  if(url.pathname!=='/api/admin/v2/summary')return json(404,{error:'not found'});
  const lastFeedback=new Map();for(const row of allRows)if(row.name?.startsWith('feedback_'))lastFeedback.set(row.id,row);
  const lastLevel=new Map();for(const row of allRows)if(row.name?.startsWith('level_select_'))lastLevel.set(row.id,row);

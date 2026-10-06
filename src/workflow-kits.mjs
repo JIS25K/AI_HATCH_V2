@@ -1,6 +1,6 @@
 // Curated on 2026-10-06 from linked primary documentation. Examples are fictional.
-export const offerVersion='custom-guide-4900-v1';
-export function offerFor(task){return {id:`${task}-${offerVersion}`,version:offerVersion,price:4900,currency:'KRW',title:'내 과목·상황에 맞춘 AI 활용 가이드',scope:'과목 또는 작업 1개 · 일회성 가이드',items:['내 자료·목표에 맞춘 단계별 요청문','도구 선택과 설정 순서','결과 검토표와 다음 작업용 재사용 양식']};}
+export const offerVersion='setup-guide-4900-v2';
+export function offerFor(task){return {id:`${task}-${offerVersion}`,version:offerVersion,price:4900,currency:'KRW',title:'내 과목·상황에 맞춘 AI 활용 가이드',scope:'과목 또는 작업 1개 · 일회성 가이드',items:['내 작업에 필요한 도구 선택과 설치·초기 설정 안내','내 과목·자료로 따라 하는 첫 실행 절차와 요청문','자주 막히는 지점의 해결 방법과 결과 검토표','다음 자료에도 다시 쓰는 작업 양식']};}
 export const kits={
  research:{
   headline:'출처를 다시 찾을 수 있는 비교표',
