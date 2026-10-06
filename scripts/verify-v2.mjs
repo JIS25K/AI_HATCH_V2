@@ -103,6 +103,26 @@ funnel=await a('/api/admin/v2/summary?end=2026-10-07T00:00:00Z',undefined,auth);
 for(const task of tasks)for(const blocker of blockers)for(const practice of practices){const plan=makePlan({task:task.id,blocker:blocker.id,practice:practice.id});assert.equal(plan.kit.demo.headers.length,3);assert.equal(plan.offer.price,4900);assert.match(plan.prompt,/출력 계약/);}
 console.log('PASS: purchase prerequisites, price snapshot, copy click/success separation, repeated-click and cross-run browser dedup, all 27 funnels, QA/source/cutoff filters and CSV.');
 console.log('PASS: independent V2 root/admin, legacy redirects preserve query, V1 endpoints absent; admin credential initialization/login/logout; 27 plans; identity isolation; origin checks; event idempotency; QA exclusion; cohort statistics; CSV.');
+// The short check measures scenario decisions, independently of the work funnel.
+const checkUser=client(),checkRun=await enter(checkUser,'check_experiment');
+const publicQuestions=(await checkUser('/api/v2/content')).abilityCheck.questions;
+assert.equal(publicQuestions.length,4);assert.equal(typeof publicQuestions[0].options[0],'string');
+await checkUser('/api/v2/event',{runId:checkRun.id,name:'check_complete',answers:[1,0,2,1]},{status:400});
+await event(checkUser,checkRun.id,'check_start');await event(checkUser,checkRun.id,'check_start');
+await b('/api/v2/event',{runId:checkRun.id,name:'check_complete',answers:[1,0,2,1]},{status:404});
+for(const answers of [[1,0,2],[1,0,2,8],[1,0,2,'1'],[null,0,2,1]])await checkUser('/api/v2/event',{runId:checkRun.id,name:'check_complete',answers},{status:400});
+await checkUser('/api/v2/event',{runId:checkRun.id,name:'check_answer',question:4,answer:0},{status:400});
+const checkAnswers=[1,0,2,1];for(let i=0;i<4;i++)await event(checkUser,checkRun.id,'check_answer',{question:i,answer:checkAnswers[i]});
+const checked=await event(checkUser,checkRun.id,'check_complete',{answers:checkAnswers,ready:0});assert.equal(checked.check.ready,4);
+assert.equal((await event(checkUser,checkRun.id,'check_complete',{answers:[0,1,0,0]})).check.ready,4); // Retries cannot rewrite an issued result.
+assert.equal((await checkUser('/api/v2/run?id='+checkRun.id)).check.ready,4);
+assert.equal(sqlite.prepare('SELECT started_at FROM v2_runs WHERE id=?').get(checkRun.id).started_at,null);
+const checkSummary=await checkUser('/api/admin/v2/summary?source=check_experiment',undefined,auth);assert.equal(checkSummary.abilityCheck.started,1);assert.equal(checkSummary.abilityCheck.completed,1);assert.ok(checkSummary.abilityCheck.dimensions.every(d=>d.users===1));assert.equal(checkSummary.metrics.started,0);
+assert.match(await checkUser('/api/admin/v2/export.csv?source=check_experiment',undefined,auth),/check_complete_decision-check-v1/);
+const {assess}=await import('../src/ability-check.mjs');
+for(let a=0;a<3;a++)for(let b=0;b<3;b++)for(let c=0;c<3;c++)for(let d=0;d<3;d++){const r=assess([a,b,c,d]);assert.equal(r.dimensions.length,4);assert.ok(r.ready>=0&&r.ready<=4);assert.equal(r.priority.score,Math.min(...r.dimensions.map(x=>x.score)));}
+console.log('Decision check: 81 profiles, validation, ownership, deduplication, restore and separate funnel verified.');
+
 if(process.argv.includes('--serve-admin-fixture')){
  const {createServer}=await import('node:http');
  const mime={'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml'};
