@@ -51,3 +51,33 @@ Offer view/purchase events use version-suffixed names from this revision onward.
 
 ### Short decision check (2026-10-06)
 The optional landing-page section presents four scenarios: context design, evidence tracing, workflow design, and bounded delegation. Each has three choices, feedback on the selected answer, a recommended next action, and a link to a relevant Level 0–7 example. It does not certify skill or convert answers into an AI level. Answers and completed feedback are stored using the existing owned run and event table; public question payloads omit scoring keys. Completion is immutable per run/version, retries are idempotent, and admin counts distinct anonymous browsers with the existing QA/source/date filters. Question events count first submissions; final answer changes made before completing are captured in the completion event. Test entry uses `?qa=1&src=internal_review`. This optional path never marks the core work funnel as started.
+
+### Adaptive Level 0–7 assessment (2026-10-07)
+
+The current UI replaces the four-scenario check with five common questions, two branch-specific questions, and one conditional clarification. It targets people with basic AI experience and retains familiar technical terms (prompt, context, connector/MCP, workflow, agent, evaluation set). Terminology knowledge does not earn a level. Questions distinguish self-reported execution experience from situational judgment. Level 0–7 is eight positions including the entry level.
+
+| Common question | What it distinguishes |
+| --- | --- |
+| Brief | Goals and constraints versus style or output length alone |
+| Context | Ad hoc questions, specified tasks, maintained reusable context |
+| Evidence | Original-source conditions versus agreement between AI answers |
+| Execution | Manual turns, connected sources, fixed workflow, agent-chosen actions |
+| Operation | Ad hoc review, one-off test, repeatable evaluation, shared infrastructure |
+
+Each candidate stage receives one concrete experience question and one new-situation question. Examples include access scope for connected sources, intermediate inputs for workflows, stopping conditions for agents, failed-case rechecks for evaluation, and onboarding a new workflow into shared infrastructure. A clarification is asked for experience disagreement, advanced judgment gaps, or explicit non-use conflicting with an advanced claim.
+
+Classification uses the lower of reported scope and the explicitly selected concrete behavior. It does not infer unasked intermediate skills. Using a default agent is not evidence of building one; several independent automations are not evidence of shared infrastructure. Source checking and task judgment are separately reported, and correct guesses cannot raise an experience level. Levels can be nonsequential: evaluation without an agent is valid. Explicit non-use conflicting with advanced experience yields a provisional entry result. Results describe the selected behavior and remain self-report estimates; artifacts, execution quality, time savings, and real proficiency have not been validated.
+
+Review passes completed:
+1. Construct coverage: separate configuration, execution, quality assurance, and shared operations; map each branch to a concrete distinguishing behavior.
+2. Language: retain professional vocabulary with short explanations where needed; remove a leading “choose the first item” clarification, distinguish actual from intended experience, and provide “not sure” in judgment questions.
+3. Redundancy: change the basic branch to correcting output format; change evaluation follow-up to failed-input rechecks; change infrastructure follow-up to integrating a new workflow.
+4. Adversarial profiles: nonuser with correct judgments, unchanged templates, independent automations, evaluations without agents, contradictory experience, and judgment gaps with genuine reported experience.
+5. Exhaustive routing: `node scripts/verify-level-check.mjs` covers all 60,448 valid answer paths, including seven- and eight-question completions, all eight reachable levels, malformed paths, and classification bounds. These are synthetic paths, not participants or a reliability study.
+6. End-to-end checks: answer editing changes the branch, reload resumes an unfinished assessment, completion is restored, buttons work by keyboard, the result links to the correct level, and the mobile layout fits without horizontal overflow.
+
+Analytics and persistence: `/api/v2/level-check` validates sequential paths and computes the result on the server. Draft + first question event + completion are written atomically. Completion is immutable per run/version. Mutable draft rows are omitted from analytical CSV/summary queries. New assessment events are versioned separately from the previous four-question check. Admin shows started/completed browsers, conditional step 8, per-question responses, estimated-level distribution and provisional results using the existing QA/source/cohort filters. No assessment action starts the main work funnel.
+
+Design background: the European Commission [DigComp 3.0](https://joint-research-centre.ec.europa.eu/scientific-activities/key-competences-lifelong-learning/digital-competence-framework-digcomp/digcomp-30_en) describes proficiency using cognitive demand, task complexity and autonomy. [UNESCO's AI competency framework for students](https://www.unesco.org/en/articles/ai-competency-framework-students?hub=67098) separates understanding, application and creation. These distinctions informed the experience/judgment separation. AI HATCH's stage definitions, questions and rules are custom and have not been validated by either framework.
+
+Next evidence to collect: whether representative users interpret the options as intended, which question/branch they abandon, where self-report disagrees with a short real task, and whether results predict useful next actions. Do not present path coverage as evidence of measurement accuracy.

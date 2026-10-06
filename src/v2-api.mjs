@@ -1,3 +1,4 @@
+import {levelCheckVersion,levelIntro,flow,publicQuestion,assessLevel} from './level-check.mjs';
 import {checkVersion,publicCheck,assess,questions} from './ability-check.mjs';
 import {offerFor,offerVersion} from './workflow-kits.mjs';
 import {version,levels,tasks,blockers,practices,outcomes,reasons,makePlan} from './v2-content.mjs';
@@ -8,7 +9,7 @@ const uuid=/^[a-f0-9-]{36}$/;
 const writeEvent=(db,run,name,detail=null)=>db.run('INSERT OR IGNORE INTO v2_events(run_id,name,detail) VALUES(?,?,?)',run,name,detail);
 export async function v2Route({request,url,db,visitor,json}){
  const path=url.pathname;
- if(path==='/api/v2/content'&&request.method==='GET')return json(200,{version,levels,tasks,blockers,practices,outcomes,reasons,abilityCheck:publicCheck});
+ if(path==='/api/v2/content'&&request.method==='GET')return json(200,{version,levels,tasks,blockers,practices,outcomes,reasons,abilityCheck:publicCheck,levelCheck:levelIntro});
  if(path.startsWith('/api/admin/v2/'))return adminRoute({request,url,db,json}); // Authenticated by the parent router.
  if(request.method==='GET'&&path==='/api/v2/run'){
   const run=await db.one('SELECT * FROM v2_runs WHERE id=? AND visitor_id=?',url.searchParams.get('id')||'',visitor);
@@ -16,7 +17,7 @@ export async function v2Route({request,url,db,visitor,json}){
   const feedback=await db.one("SELECT detail FROM v2_events WHERE run_id=? AND name LIKE 'feedback_%' ORDER BY created_at DESC,rowid DESC LIMIT 1",run.id);
   const selection=await db.one("SELECT detail FROM v2_events WHERE run_id=? AND name LIKE 'level_select_%' ORDER BY created_at DESC,rowid DESC LIMIT 1",run.id);
   const check=await db.one("SELECT detail FROM v2_events WHERE run_id=? AND name=?",run.id,'check_complete_'+checkVersion);
-  return json(200,{check:check?assess(JSON.parse(check.detail).answers):null,run,plan:run.result_at?makePlan(run):null,feedback:feedback?.detail?JSON.parse(feedback.detail):null,selectedLevel:selection?Number(selection.detail):null});
+  return json(200,{levelCheck:await readLevelCheck(db,run.id),check:check?assess(JSON.parse(check.detail).answers):null,run,plan:run.result_at?makePlan(run):null,feedback:feedback?.detail?JSON.parse(feedback.detail):null,selectedLevel:selection?Number(selection.detail):null});
  }
  if(request.method!=='POST')return json(404,{error:'not found'});
  if(request.headers.get('origin')!==url.origin||!request.headers.get('content-type')?.startsWith('application/json'))fail(403,'사이트에서 다시 시도해주세요.');
@@ -32,6 +33,27 @@ export async function v2Route({request,url,db,visitor,json}){
   return json(200,{run});
  }
  const run=await db.one('SELECT * FROM v2_runs WHERE id=? AND visitor_id=?',input.runId||'',visitor);if(!run)fail(404,'방문 정보가 만료되었습니다. 새로고침 후 다시 시도해주세요.');
+ if(path==='/api/v2/level-check'){
+  if(!['start','save'].includes(input.action))fail(400,'진단 요청을 확인해주세요.');
+  const before=await readLevelCheck(db,run.id);
+  if(before.result)return json(200,before);
+  if(input.action==='start'){
+   await writeEvent(db,run.id,'level_check_start_'+levelCheckVersion,JSON.stringify({version:levelCheckVersion}));
+   return json(200,await readLevelCheck(db,run.id));
+  }
+  if(!before.started)fail(400,'진단을 먼저 시작해주세요.');
+  const f=flow(input.answers);if(!f||input.answers.length===0||input.answers.length>before.answers.length+1)fail(400,'현재 질문부터 차례대로 답해주세요.');
+  const normalized=input.answers.map(({id,choice})=>({id,choice}));
+  const detail=JSON.stringify({version:levelCheckVersion,answers:normalized});
+  const last=normalized.at(-1);
+  const writes=[
+   ['INSERT INTO v2_events(run_id,name,detail) VALUES(?,?,?) ON CONFLICT(run_id,name) DO UPDATE SET detail=excluded.detail,updated_at=CURRENT_TIMESTAMP',run.id,'level_check_state_'+levelCheckVersion,detail],
+   ['INSERT OR IGNORE INTO v2_events(run_id,name,detail) VALUES(?,?,?)',run.id,'level_check_answer_'+levelCheckVersion+'_'+last.id,JSON.stringify({version:levelCheckVersion,question:last.id,choice:last.choice,position:normalized.length})]
+  ];
+  if(f.complete)writes.push(['INSERT OR IGNORE INTO v2_events(run_id,name,detail) VALUES(?,?,?)',run.id,'level_check_complete_'+levelCheckVersion,JSON.stringify({...JSON.parse(detail),result:assessLevel(normalized)})]);
+  await db.batch(writes);
+  return json(200,await readLevelCheck(db,run.id));
+ }
  if(path==='/api/v2/select'){
   if(run.result_at){if(run.task===input.task&&run.blocker===input.blocker&&run.practice===input.practice)return json(200,{run,plan:makePlan(run)});fail(409,'완료된 실행안입니다. 새 작업을 선택해주세요.');}
   if(!has(tasks,input.task))fail(400,'작업을 선택해주세요.');
@@ -80,13 +102,20 @@ export async function v2Route({request,url,db,visitor,json}){
  }
  return json(404,{error:'not found'});
 }
+async function readLevelCheck(db,id){
+ const completed=await db.one('SELECT detail FROM v2_events WHERE run_id=? AND name=?',id,'level_check_complete_'+levelCheckVersion);
+ const draft=completed||await db.one('SELECT detail FROM v2_events WHERE run_id=? AND name=?',id,'level_check_state_'+levelCheckVersion);
+ const started=!!completed||!!await db.one('SELECT 1 FROM v2_events WHERE run_id=? AND name=?',id,'level_check_start_'+levelCheckVersion);
+ const answers=draft?JSON.parse(draft.detail).answers:[],f=flow(answers);
+ return {version:levelCheckVersion,started,answers,questions:f.path.map(publicQuestion),result:completed?assessLevel(answers):null};
+}
 function dateValue(value,fallback){if(!value)return fallback;if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{3})?Z$/.test(value)||!Number.isFinite(Date.parse(value)))fail(400,'조회 기간을 확인해주세요.');return new Date(value).toISOString().slice(0,19).replace('T',' ')}
 async function adminRoute({request,url,db,json}){
  if(request.method!=='GET')return json(405,{error:'허용되지 않은 요청입니다.'});
  const start=dateValue(url.searchParams.get('start'),'2000-01-01 00:00:00'),end=dateValue(url.searchParams.get('end'),'2100-01-01 00:00:00');if(start>=end)fail(400,'종료 시각은 시작 시각 이후여야 합니다.');
  const includeQa=url.searchParams.get('qa')==='1',source=clean(url.searchParams.get('source'));
  const where='r.created_at>=? AND r.created_at<?'+(includeQa?'':' AND r.is_qa=0')+(source?' AND r.source=?':'');const args=[start,end,...(source?[source]:[])];
- const allRows=await db.all(`SELECT r.*,e.name,e.detail,e.created_at AS event_at,e.updated_at AS event_updated_at FROM v2_runs r LEFT JOIN v2_events e ON e.run_id=r.id AND e.created_at<? WHERE ${where} ORDER BY r.created_at,r.id,e.created_at,e.rowid`,end,...args);
+ const allRows=await db.all(`SELECT r.*,e.name,e.detail,e.created_at AS event_at,e.updated_at AS event_updated_at FROM v2_runs r LEFT JOIN v2_events e ON e.run_id=r.id AND e.created_at<? AND e.name NOT LIKE 'level_check_state_%' WHERE ${where} ORDER BY r.created_at,r.id,e.created_at,e.rowid`,end,...args);
  if(url.pathname==='/api/admin/v2/export.csv'){
   const cell=v=>'"'+String(v??'').replace(/^[=+@\-\t\r]/,"'$&").replaceAll('"','""')+'"';
   const columns=['id','visitor_id','version','source','utm_source','utm_campaign','is_qa','task','blocker','practice','created_at','started_at','result_at','name','detail','event_at','event_updated_at'];
@@ -101,6 +130,8 @@ async function adminRoute({request,url,db,json}){
  const checkRows=allRows.filter(r=>r.name==='check_complete_'+checkVersion);
  const unique=items=>new Set(items.map(r=>r.visitor_id)).size;
  const abilityCheck={version:checkVersion,started:unique(allRows.filter(r=>r.name==='check_start_'+checkVersion)),completed:unique(checkRows),steps:questions.map((q,i)=>({area:q.area,users:unique(allRows.filter(r=>r.name==='check_answer_'+checkVersion+'_'+i))})),dimensions:questions.map((q,i)=>({area:q.area,users:unique(checkRows.filter(r=>assess(JSON.parse(r.detail).answers)?.dimensions[i].score===2))}))};
+ const levelCompleted=allRows.filter(r=>r.name==='level_check_complete_'+levelCheckVersion);
+ const levelAssessment={version:levelCheckVersion,started:unique(allRows.filter(r=>r.name==='level_check_start_'+levelCheckVersion)),completed:unique(levelCompleted),byLevel:levels.map(l=>({level:l.level,users:unique(levelCompleted.filter(r=>JSON.parse(r.detail).result.level===l.level))})),provisional:unique(levelCompleted.filter(r=>JSON.parse(r.detail).result.provisional)),steps:Array.from({length:8},(_,i)=>({position:i+1,users:unique(allRows.filter(r=>r.name?.startsWith('level_check_answer_'+levelCheckVersion+'_')&&JSON.parse(r.detail).position===i+1))})),byQuestion:[...new Set(allRows.filter(r=>r.name?.startsWith('level_check_answer_'+levelCheckVersion+'_')).map(r=>JSON.parse(r.detail).question))].map(id=>({id,users:unique(allRows.filter(r=>r.name==='level_check_answer_'+levelCheckVersion+'_'+id))})),judgments:['brief','evidence'].map(id=>({id,users:unique(levelCompleted.filter(r=>JSON.parse(r.detail).result.judgments.find(j=>j.id===id)?.correct))}))};
  const rows=allRows.filter(row=>!row.name?.startsWith('feedback_')).concat([...lastFeedback.values()].map(row=>({...row,name:'feedback'})));
  const metricsFor=items=>{const sets=Object.fromEntries(['visitors','started','generated','viewed','copyClicked','copied','offerViewed','purchaseClicked','trial','applied','useful','feedback'].map(k=>[k,new Set()]));const runs=new Set();for(const r of items){runs.add(r.id);sets.visitors.add(r.visitor_id);if(r.started_at&&r.started_at<end)sets.started.add(r.visitor_id);if(r.result_at&&r.result_at<end)sets.generated.add(r.visitor_id);const key={result_view:'viewed',prompt_copy_click:'copyClicked',prompt_copy:'copied',offer_view:'offerViewed',purchase_click:'purchaseClicked',trial_open:'trial'}[r.name];if(key)sets[key].add(r.visitor_id);if(r.name==='feedback'){sets.feedback.add(r.visitor_id);const f=JSON.parse(r.detail);if(f.outcome!=='not_yet')sets.applied.add(r.visitor_id);if(f.outcome==='useful')sets.useful.add(r.visitor_id)}}return {...Object.fromEntries(Object.entries(sets).map(([k,v])=>[k,v.size])),runs:runs.size}};
  const group=key=>[...new Set(rows.map(r=>r[key]||'unselected'))].map(value=>({value,...metricsFor(rows.filter(r=>(r[key]||'unselected')===value))}));
@@ -111,5 +142,5 @@ async function adminRoute({request,url,db,json}){
  const reasonSummary=Object.entries(reasons).flatMap(([outcome,rs])=>rs.map(reason=>({outcome,value:reason.id,users:new Set(feedback.filter(r=>{const f=JSON.parse(r.detail);return f.outcome===outcome&&f.reason===reason.id}).map(r=>r.visitor_id)).size})));
  const excluded=(await db.one(`SELECT COUNT(DISTINCT visitor_id) AS n FROM v2_runs r WHERE r.created_at>=? AND r.created_at<? AND r.is_qa=1${source?' AND r.source=?':''}`,...args)).n;
  const first=(await db.one('SELECT MIN(created_at) AS at FROM v2_runs WHERE is_qa=0')).at;
- return json(200,{version,start,end,includeQa,excludedQa:excluded,firstEntry:first,metrics:metricsFor(rows),levelMap,abilityCheck,byFunnel,byOffer,byVersion:group('version'),bySource:group('source'),byTask:group('task'),byBlocker:group('blocker'),byPractice:group('practice'),outcomes:outcomesSummary,reasons:reasonSummary});
+ return json(200,{version,start,end,includeQa,excludedQa:excluded,firstEntry:first,metrics:metricsFor(rows),levelMap,abilityCheck,levelAssessment,byFunnel,byOffer,byVersion:group('version'),bySource:group('source'),byTask:group('task'),byBlocker:group('blocker'),byPractice:group('practice'),outcomes:outcomesSummary,reasons:reasonSummary});
 }

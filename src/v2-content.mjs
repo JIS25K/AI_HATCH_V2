@@ -1,5 +1,5 @@
 import {kitFor,offerFor} from './workflow-kits.mjs';
-export const version='workflow-study-2026-10-06-v6-decision-check';
+export const version='workflow-study-2026-10-07-v7-level-assessment';
 export const levels=[
  {level:0,workflowTitle:"낯선 개념 이해하기",workflow:["모르는 개념 질문", "AI 설명과 예시 받기", "교재와 내용 대조", "내 말로 다시 정리"],keywords:[{"term": "Q&A", "meaning": "질문과 답변"}, {"term": "Summarization", "meaning": "긴 자료의 핵심 요약"}, {"term": "Fact-checking", "meaning": "답을 원문과 대조"}],name:'물어보기',term:'Search & Q&A',summary:'궁금한 것을 묻고, 필요한 답을 얻습니다.',example:'어려운 개념의 설명을 듣거나, 긴 글을 요약합니다.',check:'막히면 질문하지만, 실제 작업은 대부분 직접 합니다.',next:'하고 싶은 일의 목적과 원하는 답의 형식을 함께 알려주세요.'},
  {level:1,workflowTitle:"조건에 맞는 발표 초안 만들기",workflow:["청중·목적·분량 지정", "원하는 출력 예시 제공", "AI 초안 확인", "빠진 조건을 짚어 수정"],keywords:[{"term": "Task specification", "meaning": "목표와 완료 조건 정의"}, {"term": "Few-shot", "meaning": "원하는 답의 예시 제공"}, {"term": "Output format", "meaning": "결과의 형식 지정"}],name:'명확하게 지시하기',term:'Prompt Operator',summary:'목적·조건·형식을 정해 일을 맡깁니다.',example:'“신입생 대상 발표용으로, 이 내용을 세 문장으로 정리해줘.”',check:'누구를 위한 결과인지, 어떤 조건을 지킬지 구체적으로 설명합니다.',next:'매번 필요한 배경 자료와 공통 지침을 한곳에 모아보세요.'},

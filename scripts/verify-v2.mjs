@@ -123,6 +123,35 @@ const {assess}=await import('../src/ability-check.mjs');
 for(let a=0;a<3;a++)for(let b=0;b<3;b++)for(let c=0;c<3;c++)for(let d=0;d<3;d++){const r=assess([a,b,c,d]);assert.equal(r.dimensions.length,4);assert.ok(r.ready>=0&&r.ready<=4);assert.equal(r.priority.score,Math.min(...r.dimensions.map(x=>x.score)));}
 console.log('Decision check: 81 profiles, validation, ownership, deduplication, restore and separate funnel verified.');
 
+// Adaptive assessment: owned, resumable drafts; immutable results; separate metrics.
+const {common:levelCommon,flow:levelFlow}=await import('../src/level-check.mjs');
+const lc=client(),lr=await enter(lc,'level_experiment');
+const postLevel=(payload,opts)=>lc('/api/v2/level-check',{runId:lr.id,...payload},opts);
+await postLevel({action:'save',answers:[{id:'brief',choice:1}]},{status:400});
+let ls=await postLevel({action:'start'});assert.equal(ls.answers.length,0);assert.equal(ls.questions.length,5);
+assert.ok(!JSON.stringify(ls.questions).includes('correct'));
+await b('/api/v2/level-check',{runId:lr.id,action:'start'},{status:404});
+await postLevel({action:'save',answers:[{id:'brief',choice:1},{id:'context',choice:3}]},{status:400});
+let la=[];for(const [i,choice] of [1,3,0,2,0].entries()){la.push({id:levelCommon[i].id,choice});ls=await postLevel({action:'save',answers:la});}
+assert.equal(ls.questions[5].id,'experience_4');
+assert.equal((await lc('/api/v2/run?id='+lr.id)).levelCheck.answers.length,5);
+// Editing an earlier answer must discard incompatible branch history.
+la=la.slice(0,3);la.push({id:'execution',choice:1});await postLevel({action:'save',answers:la});la.push({id:'operation',choice:0});ls=await postLevel({action:'save',answers:la});assert.equal(ls.questions[5].id,'experience_3');
+await postLevel({action:'save',answers:[...la,{id:'experience_4',choice:1}]},{status:400});
+for(const choice of [2,0]){const f=levelFlow(la);la.push({id:f.next.id,choice});ls=await postLevel({action:'save',answers:la});}
+assert.equal(ls.result.level,3);assert.equal(ls.answers.length,7);
+assert.equal((await postLevel({action:'save',answers:la})).result.level,3);
+assert.equal((await lc('/api/v2/run?id='+lr.id)).levelCheck.result.level,3);
+assert.equal((await postLevel({action:'start'})).result.level,3);
+assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM v2_events WHERE run_id=? AND name LIKE ?').get(lr.id,'level_check_complete_%').n,1);
+const lm=await lc('/api/admin/v2/summary?source=level_experiment',undefined,auth);assert.equal(lm.levelAssessment.started,1);assert.equal(lm.levelAssessment.completed,1);assert.equal(lm.levelAssessment.byLevel[3].users,1);assert.equal(lm.levelAssessment.steps[7].users,0);assert.equal(lm.metrics.started,0);
+const levelCsv=await lc('/api/admin/v2/export.csv?source=level_experiment',undefined,auth);assert.match(levelCsv,/level_check_complete/);assert.doesNotMatch(levelCsv,/level_check_state/);
+// QA exclusion applies to the new assessment as well.
+await event(b,qa.id,'level_explore',{level:2});await b('/api/v2/level-check',{runId:qa.id,action:'start'});
+assert.equal((await lc('/api/admin/v2/summary',undefined,auth)).levelAssessment.started,1);
+assert.equal((await lc('/api/admin/v2/summary?qa=1',undefined,auth)).levelAssessment.started,2);
+console.log('Adaptive level check: branch editing, resume, server classification, immutable completion, QA and independent funnel passed.');
+
 if(process.argv.includes('--serve-admin-fixture')){
  const {createServer}=await import('node:http');
  const mime={'.js':'application/javascript','.css':'text/css','.svg':'image/svg+xml'};
